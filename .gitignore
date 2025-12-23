@@ -1,0 +1,23 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+#env
+.env
+
+#logs
+logs/
+
+#diretorios
+comprovantes_base/
+diretorio_final_comprovantes/
+
+# shell script
+run_receipt_organizer.sh
