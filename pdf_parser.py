@@ -177,16 +177,24 @@ class PdfParser:
 
     def move_file(self, receipt: Path):
         if not self.info or not self.ano or not self.mes:
-            self.logger.warning(f"Arquivo ignorado por falta de dados:{receipt.name}")
+            self.logger.warning(f"Arquivo ignorado por falta de dados: {receipt.name}")
             return
 
         destino_dir = self.final_dir / self.ano / self.mes
         destino_dir.mkdir(parents=True, exist_ok=True)
 
         data = self.info.get("data_pagamento") or self.info.get("data_vencimento")
-        new_name = f"{self.info['beneficiario']}_{data}.pdf"
+        base_name = f"{self.info['beneficiario']}_{data}"
+        new_name = f"{base_name}.pdf"
 
         destino_final = destino_dir / new_name
+
+        contador = 1
+        while destino_final.exists():
+            new_name = f"{base_name}_{contador}.pdf"
+            destino_final = destino_dir / new_name
+            contador += 1
+
         shutil.move(receipt, destino_final)
 
         self.logger.info(f"Arquivo movido para: {destino_final}")

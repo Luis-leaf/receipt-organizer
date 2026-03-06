@@ -21,8 +21,8 @@ class JpegParser:
 
         self.logger = self._setup_logger()
 
-        self.base_dir = Path(os.getenv("PATH_BASE"))
-        self.final_dir = Path(os.getenv("PATH_FINAL"))
+        self.base_dir = Path(os.getenv("PATH_BASE",""))
+        self.final_dir = Path(os.getenv("PATH_FINAL", ""))
 
         self.info: dict[str, str] | None = None
         self.ano: str | None = None
