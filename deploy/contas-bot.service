@@ -1,0 +1,28 @@
+# Serviço de usuário do systemd para o bot de contas.
+#
+# Instalação:
+#   mkdir -p ~/.config/systemd/user
+#   cp deploy/contas-bot.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now contas-bot
+#
+# Para rodar mesmo sem você estar logado (ex.: depois de reiniciar o PC):
+#   sudo loginctl enable-linger $USER
+#
+# Ver o que está acontecendo:
+#   systemctl --user status contas-bot
+#   journalctl --user -u contas-bot -f
+
+[Unit]
+Description=Bot de contas (receipt-organizer)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=%h/Documentos/receipt-organizer
+ExecStart=%h/Documentos/receipt-organizer/.venv/bin/python main.py bot
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=default.target

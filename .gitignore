@@ -1,23 +1,46 @@
-# Python-generated files
+# =====================================================================
+# Dados pessoais: NUNCA devem ir para o repositório (ele é público)
+# =====================================================================
+
+# configuração com caminhos, token do Telegram e chat ids
+.env
+
+# cadastro real de contas (o modelo versionado é o contas.exemplo.yaml)
+contas.yaml
+
+# extratos bancários, em qualquer pasta
+extratos/
+*.ofx
+*.OFX
+*.pdf
+*.PDF
+
+# banco de dados com as transações importadas
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# logs podem conter descrições de transações e ids de chat
+logs/
+
+# pastas da versão antiga (organizador de comprovantes)
+comprovantes_base/
+diretorio_final_comprovantes/
+run_receipt_organizer.sh
+
+# =====================================================================
+# Python e ferramentas
+# =====================================================================
 __pycache__/
 *.py[oc]
 build/
 dist/
 wheels/
 *.egg-info
-
-# Virtual environments
 .venv
+.pytest_cache/
+.ruff_cache/
 
-#env
-.env
-
-#logs
-logs/
-
-#diretorios
-comprovantes_base/
-diretorio_final_comprovantes/
-
-# shell script
-run_receipt_organizer.sh
+# trava de execução
+.process.lock
