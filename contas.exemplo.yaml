@@ -1,0 +1,23 @@
+# Copie para contas.yaml e ajuste. Cada conta é procurada nos extratos pelos
+# `padroes` (regex, sem diferença de maiúscula/acento) perto do dia de `vencimento`.
+# `banco` (nubank | itau | mercadopago) é opcional e restringe a busca.
+
+contas:
+  - id: aluguel
+    nome: Aluguel
+    vencimento: 1
+    meio: boleto
+    padroes: ["NOME DA IMOBILIARIA"]
+
+  - id: energia
+    nome: Energia
+    vencimento: 10
+    meio: boleto
+    padroes: ["COPEL", "ENEL"]
+
+  - id: fatura-nubank
+    nome: Fatura Nubank
+    vencimento: 8
+    meio: fatura
+    banco: nubank
+    padroes: ["^PAGAMENTO DE FATURA$"]

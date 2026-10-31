@@ -1,13 +1,30 @@
 [project]
 name = "receipt-organizer"
 version = "0.1.0"
-description = "Add your description here"
+description = "Concilia extratos bancários com as contas do mês e avisa o que falta pagar"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "img2pdf>=0.6.3",
     "pdfplumber>=0.11.8",
-    "pillow>=12.0.0",
-    "pytesseract>=0.3.13",
     "python-dotenv>=1.2.1",
+    "pyyaml>=6.0.3",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "ruff>=0.17.3",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, isort, bugbear, pyupgrade, simplify
+select = ["E", "W", "F", "I", "B", "UP", "SIM"]
+# ternário no lugar de if/else simples deixa o código mais difícil de ler
+ignore = ["SIM108"]
