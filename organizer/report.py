@@ -1,8 +1,9 @@
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from organizer.models import nome_banco
 from organizer.reconcile import Competencia, Situacao, Status
+from organizer.recorrentes import FATURAS_ANALISADAS, Previsao, Recorrente
 
 MESES = [
     "janeiro",
@@ -113,5 +114,90 @@ def montar_relatorio(titulo: str, situacoes: list[Situacao], cobertura: dict[str
         linhas.append("Extratos importados: " + " · ".join(partes))
     else:
         linhas.append("Nenhum extrato importado ainda. Veja 'Como importar extratos' no README.")
+
+    return "\n".join(linhas)
+
+
+# --- compras recorrentes no cartão ---------------------------------------
+
+SEM_FATURA = (
+    "Nenhuma fatura de cartão importada. Exporte a fatura do Nubank em OFX "
+    "(app → Cartão → Faturas → Exportar) e coloque na pasta de entrada."
+)
+
+
+def nome_cartao(banco: str) -> str:
+    return f"Cartão {nome_banco(banco)}"
+
+
+def lista_de_dias(datas: list[date]) -> str:
+    return ", ".join(f"{d:%d/%m}" for d in datas)
+
+
+def montar_previsao(previsoes: list[Previsao], hoje: date) -> str:
+    """Terminal: o que ainda vai cair de recorrente na fatura aberta."""
+    titulo = f"Recorrentes no cartão em {hoje:%d/%m/%Y}"
+    linhas = [titulo.upper(), "─" * len(titulo)]
+
+    if not previsoes:
+        linhas += ["", SEM_FATURA]
+
+    for p in previsoes:
+        ultimo_dia = p.fechamento - timedelta(days=1)
+        cabecalho = f"{nome_cartao(p.banco)} · fatura aberta de {p.inicio:%d/%m} a {ultimo_dia:%d/%m}"
+        linhas += ["", f"{cabecalho} · fecha {p.fechamento:%d/%m}"]
+        if p.faturas_faltando:
+            linhas.append(f"  ⚠️ Falta importar a fatura que fechou em {lista_de_dias(p.faturas_faltando)}")
+
+        linhas += ["", f"Ainda vai cair ({len(p.ainda_vai_cair)}) · {reais(p.total)}"]
+        if not p.ainda_vai_cair:
+            linhas.append("  Nada mais até o fechamento.")
+        for dia, r in p.ainda_vai_cair:
+            linhas.append(f"  🔁 {dia:%d/%m}  {r.nome:<40} ~{reais(r.valor)}")
+
+        if p.ja_deve_ter_caido:
+            linhas += ["", f"Já devem ter caído ({len(p.ja_deve_ter_caido)})"]
+            for dia, r in p.ja_deve_ter_caido:
+                linhas.append(f"  ✔️ {dia:%d/%m}  {r.nome:<40} ~{reais(r.valor)}")
+
+    return "\n".join(linhas)
+
+
+def montar_relatorio_recorrentes(recorrentes: list[Recorrente], faturas: dict) -> str:
+    """Terminal: todas as recorrentes encontradas, para conferir a detecção."""
+    titulo = "Compras recorrentes no cartão"
+    linhas = [titulo.upper(), "─" * len(titulo)]
+
+    if not faturas:
+        linhas += ["", SEM_FATURA]
+
+    for (banco, cartao), periodos in faturas.items():
+        ultimas = periodos[-FATURAS_ANALISADAS:]
+        do_cartao = [r for r in recorrentes if (r.banco, r.cartao) == (banco, cartao)]
+        ativas = [r for r in do_cartao if r.ativa]
+        paradas = [r for r in do_cartao if not r.ativa]
+        por_mes = sum((r.valor for r in ativas), Decimal(0))
+
+        linhas += [
+            "",
+            f"{nome_cartao(banco)} · {len(ultimas)} fatura(s), compras de "
+            f"{ultimas[0][0]:%d/%m/%Y} a {ultimas[-1][1]:%d/%m/%Y}",
+            "",
+            f"Ativas ({len(ativas)}) · {reais(por_mes)} por mês",
+        ]
+        if not ativas:
+            linhas.append("  Nenhuma compra recorrente encontrada.")
+        for r in ativas:
+            linhas.append("")
+            linhas.append(f"  🔁 dia {r.ultima.data.day:02d}  {r.nome}")
+            datas = lista_de_dias([t.data for t in r.cobrancas])
+            linhas.append(f"{RECUO}{reais(r.valor)} · cobrada em {datas}")
+
+        if paradas:
+            linhas += ["", f"Pararam de cobrar ({len(paradas)})"]
+            for r in paradas:
+                linhas.append("")
+                linhas.append(f"  ⏹️ dia {r.ultima.data.day:02d}  {r.nome}")
+                linhas.append(f"{RECUO}{reais(r.valor)} · última cobrança em {r.ultima.data:%d/%m}")
 
     return "\n".join(linhas)

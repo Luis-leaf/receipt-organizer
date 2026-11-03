@@ -25,6 +25,12 @@ def nome_banco(banco: str) -> str:
     return NOMES_BANCOS.get(banco, banco.title())
 
 
+# Tipos de extrato: o da conta corrente entra na conciliação das contas;
+# a fatura do cartão só é usada para achar compras recorrentes.
+TIPO_CONTA = "conta"
+TIPO_CARTAO = "cartao"
+
+
 def valor_br(texto: str) -> Decimal:
     """Converte '-6.229,33' em Decimal('-6229.33')."""
     return Decimal(texto.replace(".", "").replace(",", "."))
@@ -55,3 +61,11 @@ class Extrato:
     inicio: date
     fim: date
     transacoes: list[Transacao] = field(default_factory=list)
+    tipo: str = TIPO_CONTA
+
+    @property
+    def rotulo(self) -> str:
+        """'Nubank' ou 'Cartão Nubank', para mensagens."""
+        if self.tipo == TIPO_CARTAO:
+            return f"Cartão {nome_banco(self.banco)}"
+        return nome_banco(self.banco)

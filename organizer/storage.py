@@ -3,7 +3,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 
-from organizer.models import Extrato, Transacao
+from organizer.models import TIPO_CARTAO, TIPO_CONTA, Extrato, Transacao
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS transacoes (
@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS transacoes (
     data TEXT NOT NULL,
     valor TEXT NOT NULL,
     descricao TEXT NOT NULL,
-    id_externo TEXT NOT NULL
+    id_externo TEXT NOT NULL,
+    tipo TEXT NOT NULL DEFAULT 'conta'
 );
 
 CREATE TABLE IF NOT EXISTS importacoes (
@@ -23,7 +24,8 @@ CREATE TABLE IF NOT EXISTS importacoes (
     inicio TEXT NOT NULL,
     fim TEXT NOT NULL,
     arquivo TEXT NOT NULL,
-    importado_em TEXT NOT NULL
+    importado_em TEXT NOT NULL,
+    tipo TEXT NOT NULL DEFAULT 'conta'
 );
 
 CREATE TABLE IF NOT EXISTS pagamentos_manuais (
@@ -46,21 +48,41 @@ class Storage:
         caminho.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(caminho)
         self.conn.executescript(SCHEMA)
+        self._migrar()
+
+    def _migrar(self):
+        """Bancos criados antes das faturas de cartão não têm a coluna `tipo`."""
+        with self.conn:
+            for tabela in ("transacoes", "importacoes"):
+                colunas = {linha[1] for linha in self.conn.execute(f"PRAGMA table_info({tabela})")}
+                if "tipo" not in colunas:
+                    self.conn.execute(f"ALTER TABLE {tabela} ADD COLUMN tipo TEXT NOT NULL DEFAULT 'conta'")
 
     def salvar_extrato(self, extrato: Extrato, arquivo: str) -> int:
         """Grava as transações ignorando as já importadas. Retorna quantas eram novas."""
         antes = self.conn.total_changes
         with self.conn:
             self.conn.executemany(
-                "INSERT OR IGNORE INTO transacoes VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT OR IGNORE INTO transacoes (chave, banco, conta, data, valor, descricao, id_externo, tipo)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 [
-                    (t.chave, t.banco, t.conta, t.data.isoformat(), str(t.valor), t.descricao, t.id_externo)
+                    (
+                        t.chave,
+                        t.banco,
+                        t.conta,
+                        t.data.isoformat(),
+                        str(t.valor),
+                        t.descricao,
+                        t.id_externo,
+                        extrato.tipo,
+                    )
                     for t in extrato.transacoes
                 ],
             )
             novas = self.conn.total_changes - antes
             self.conn.execute(
-                "INSERT INTO importacoes (banco, conta, inicio, fim, arquivo, importado_em) VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO importacoes (banco, conta, inicio, fim, arquivo, importado_em, tipo)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
                     extrato.banco,
                     extrato.conta,
@@ -68,13 +90,16 @@ class Storage:
                     extrato.fim.isoformat(),
                     arquivo,
                     datetime.now().isoformat(timespec="seconds"),
+                    extrato.tipo,
                 ),
             )
         return novas
 
-    def transacoes(self) -> list[Transacao]:
+    def transacoes(self, tipo: str = TIPO_CONTA) -> list[Transacao]:
+        """Lançamentos da conta corrente (padrão) ou das faturas de cartão."""
         linhas = self.conn.execute(
-            "SELECT banco, conta, data, valor, descricao, id_externo FROM transacoes ORDER BY data"
+            "SELECT banco, conta, data, valor, descricao, id_externo FROM transacoes WHERE tipo = ? ORDER BY data",
+            (tipo,),
         )
         return [
             Transacao(banco, conta, date.fromisoformat(data), Decimal(valor), descricao, id_externo)
@@ -82,16 +107,29 @@ class Storage:
         ]
 
     def cobertura(self) -> dict[str, date]:
-        """Até que dia cada banco tem extrato importado."""
-        linhas = self.conn.execute("SELECT banco, MAX(fim) FROM importacoes GROUP BY banco ORDER BY banco")
+        """Até que dia cada banco tem extrato de conta corrente importado."""
+        linhas = self.conn.execute(
+            "SELECT banco, MAX(fim) FROM importacoes WHERE tipo = ? GROUP BY banco ORDER BY banco", (TIPO_CONTA,)
+        )
         return {banco: date.fromisoformat(fim) for banco, fim in linhas}
 
     def intervalos(self) -> dict[str, list[tuple[date, date]]]:
-        """Períodos cobertos pelos extratos importados, por banco."""
+        """Períodos cobertos pelos extratos de conta corrente importados, por banco."""
         intervalos: dict[str, list[tuple[date, date]]] = {}
-        for banco, inicio, fim in self.conn.execute("SELECT DISTINCT banco, inicio, fim FROM importacoes"):
+        linhas = self.conn.execute("SELECT DISTINCT banco, inicio, fim FROM importacoes WHERE tipo = ?", (TIPO_CONTA,))
+        for banco, inicio, fim in linhas:
             intervalos.setdefault(banco, []).append((date.fromisoformat(inicio), date.fromisoformat(fim)))
         return intervalos
+
+    def faturas(self) -> dict[tuple[str, str], list[tuple[date, date]]]:
+        """Períodos das faturas de cartão importadas, por (banco, cartão), da mais antiga à mais nova."""
+        faturas: dict[tuple[str, str], list[tuple[date, date]]] = {}
+        linhas = self.conn.execute(
+            "SELECT DISTINCT banco, conta, inicio, fim FROM importacoes WHERE tipo = ? ORDER BY fim", (TIPO_CARTAO,)
+        )
+        for banco, conta, inicio, fim in linhas:
+            faturas.setdefault((banco, conta), []).append((date.fromisoformat(inicio), date.fromisoformat(fim)))
+        return faturas
 
     def marcar_pago(self, conta_id: str, competencia: str, data: date):
         with self.conn:

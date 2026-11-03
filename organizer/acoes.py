@@ -7,8 +7,9 @@ from pathlib import Path
 from organizer.contas import Conta
 from organizer.importers import ler_extrato
 from organizer.log import get_logger
-from organizer.models import Extrato, nome_banco
+from organizer.models import TIPO_CARTAO, Extrato
 from organizer.reconcile import Competencia, Conciliador
+from organizer.recorrentes import Recorrente, encontrar_recorrentes
 from organizer.storage import Storage
 
 logger = get_logger()
@@ -23,6 +24,12 @@ def criar_conciliador(storage: Storage, contas: list[Conta]) -> Conciliador:
     )
 
 
+def buscar_recorrentes(storage: Storage) -> tuple[list[Recorrente], dict[tuple[str, str], list[tuple[date, date]]]]:
+    """Recorrentes encontradas nas faturas de cartão importadas, e as faturas usadas."""
+    faturas = storage.faturas()
+    return encontrar_recorrentes(storage.transacoes(TIPO_CARTAO), faturas), faturas
+
+
 def buscar_conta(contas: list[Conta], conta_id: str) -> Conta | None:
     for conta in contas:
         if conta.id == conta_id.lower():
@@ -35,7 +42,8 @@ def arquivar(arquivo: Path, extrato: Extrato, destino_base: Path) -> Path:
     destino_dir.mkdir(parents=True, exist_ok=True)
 
     extensao = arquivo.suffix.lower()
-    base_name = f"{extrato.banco}_{extrato.inicio:%Y-%m-%d}_{extrato.fim:%Y-%m-%d}"
+    prefixo = f"{extrato.banco}_cartao" if extrato.tipo == TIPO_CARTAO else extrato.banco
+    base_name = f"{prefixo}_{extrato.inicio:%Y-%m-%d}_{extrato.fim:%Y-%m-%d}"
     destino = destino_dir / f"{base_name}{extensao}"
 
     contador = 1
@@ -66,7 +74,7 @@ def importar_arquivos(storage: Storage, arquivos: list[Path], destino: Path | No
         novas = storage.salvar_extrato(extrato, arquivo.name)
 
         msg = (
-            f"{nome_banco(extrato.banco)} de {extrato.inicio:%d/%m/%Y} a {extrato.fim:%d/%m/%Y}: "
+            f"{extrato.rotulo} de {extrato.inicio:%d/%m/%Y} a {extrato.fim:%d/%m/%Y}: "
             f"{len(extrato.transacoes)} lançamentos ({novas} novos) · {arquivo.name}"
         )
         logger.info(msg)

@@ -9,13 +9,21 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from organizer import cadastro
-from organizer.acoes import buscar_conta, criar_conciliador, desmarcar_paga, importar_arquivos, marcar_paga
+from organizer.acoes import (
+    buscar_conta,
+    buscar_recorrentes,
+    criar_conciliador,
+    desmarcar_paga,
+    importar_arquivos,
+    marcar_paga,
+)
 from organizer.contas import MEIOS, Conta, carregar_contas
 from organizer.importers import EXTENSOES
 from organizer.log import get_logger
 from organizer.models import NOMES_BANCOS
 from organizer.reconcile import Competencia
-from organizer.report import montar_relatorio, titulo_mes
+from organizer.recorrentes import prever
+from organizer.report import montar_previsao, montar_relatorio, montar_relatorio_recorrentes, titulo_mes
 from organizer.storage import Storage
 from organizer.telegram import ContasBot, TelegramApi
 
@@ -108,6 +116,16 @@ def comando_status(storage: Storage, contas: list[Conta], mes: str | None):
 
     print()
     print(montar_relatorio(titulo, situacoes, storage.cobertura(), hoje))
+
+
+def comando_recorrentes(storage: Storage, relatorio: bool):
+    recorrentes, faturas = buscar_recorrentes(storage)
+    print()
+    if relatorio:
+        print(montar_relatorio_recorrentes(recorrentes, faturas))
+    else:
+        hoje = date.today()
+        print(montar_previsao(prever(recorrentes, faturas, hoje), hoje))
 
 
 def comando_paguei(storage: Storage, contas: list[Conta], conta_id: str, mes: str | None, desfazer: bool):
@@ -226,6 +244,13 @@ def criar_parser() -> argparse.ArgumentParser:
     buscar = sub.add_parser("buscar", help="procura um trecho nos extratos (para descobrir o padrão de uma conta)")
     buscar.add_argument("trecho")
 
+    recorrentes = sub.add_parser(
+        "recorrentes", help="compras recorrentes do cartão que ainda vão cair na fatura aberta"
+    )
+    recorrentes.add_argument(
+        "--relatorio", action="store_true", help="lista todas as recorrentes encontradas nas últimas faturas"
+    )
+
     sub.add_parser("bot", help="roda o bot do Telegram (alertas, comandos e importação automática)")
 
     return parser
@@ -252,6 +277,9 @@ def main():
 
     elif args.comando == "contas":
         comando_contas(caminho_contas, storage, args)
+
+    elif args.comando == "recorrentes":
+        comando_recorrentes(storage, args.relatorio)
 
     elif args.comando == "buscar":
         cadastro.buscar(storage, args.trecho)

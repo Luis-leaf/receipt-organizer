@@ -17,6 +17,7 @@ O projeto mudou de objetivo no caminho. O código das versões antigas continua 
 | dez/2025 | **v1: organizador de comprovantes** | Lia comprovantes de pagamento (PDF com `pdfplumber` e JPEG com OCR via Tesseract), extraía beneficiário e data, renomeava o arquivo e o movia para `ano/mês/`. Commits `993dc0e` a `3c71290`. |
 | mar/2026 | v1.1 | Ajuste no `move_file`: comprovantes com mesmo beneficiário e data deixam de sobrescrever um ao outro (`_1`, `_2`...). Commit `3108e19`, o último da v1. |
 | out/2026 | **v2: conciliação de extratos** | Guardar comprovante um a um dava trabalho e não resolvia o problema real, que era *lembrar* de pagar. Os comprovantes deram lugar aos **extratos** (OFX do Nubank, PDF do Itaú e do Mercado Pago), cruzados com um **cadastro de contas recorrentes** (`contas.yaml`). Entraram SQLite, testes e ruff. |
+| nov/2026 | v2.2: recorrentes no cartão | Importa as faturas do cartão Nubank (OFX) e descobre as compras recorrentes (assinaturas, planos, mensalidades). O comando `/recorrentes` mostra o que ainda vai cair na fatura aberta. |
 | out/2026 | v2.1: Telegram e cadastro pelo terminal | Bot com alerta diário, botão "Paguei" e comandos, usado por duas pessoas (cada uma é avisada quando a outra marca uma conta). Comandos `contas adicionar/editar/remover/testar` e `buscar` para montar o cadastro sem editar YAML. |
 
 Para ver o código da v1: `git checkout 3108e19`.
@@ -46,6 +47,7 @@ extratos do banco (o que foi pago) ─────┘                    ⏳ ven
 | Nubank | OFX |
 | Itaú | PDF ("extrato conta / lançamentos") |
 | Mercado Pago | PDF ("extrato de conta") |
+| Cartão Nubank | OFX da fatura (só para as [compras recorrentes](#4-compras-recorrentes-no-cartão)) |
 
 O banco é reconhecido pelo **conteúdo** do arquivo, então o nome do arquivo não importa. O Mercado Pago, por exemplo, gera nomes aleatórios.
 
@@ -238,12 +240,46 @@ Extratos importados: Mercado Pago até 30/10 · Nubank até 30/10
 
 ---
 
+## 4. Compras recorrentes no cartão
+
+Assinaturas e planos cobrados todo mês no cartão (streaming, celular, internet...) não aparecem no extrato da conta, só na fatura. Importe as **faturas do cartão Nubank** em OFX (app → Cartão → Faturas → Exportar) do mesmo jeito que os extratos: coloque na pasta de entrada. O projeto reconhece que é fatura pelo conteúdo do arquivo.
+
+As faturas **não entram na conciliação das contas**. Elas só servem para descobrir as recorrentes.
+
+```bash
+uv run python main.py recorrentes --relatorio   # todas as recorrentes das últimas 3 faturas
+uv run python main.py recorrentes               # o que ainda vai cair na fatura aberta
+```
+
+```
+Cartão Nubank · fatura aberta de 01/11 a 30/11 · fecha 01/12
+
+Ainda vai cair (3) · R$ 154,90
+  🔁 13/11  Streaming                                ~R$ 40,90
+  🔁 28/11  Internet                                 ~R$ 95,00
+  🔁 29/11  Celular                                  ~R$ 19,00
+
+Já devem ter caído (1)
+  ✔️ 02/11  Video                                    ~R$ 14,90
+```
+
+Como uma compra vira recorrente, olhando as **3 últimas faturas**:
+
+- mesma loja (a primeira palavra depois de intermediadores como `Ebn *` ou `Pg *`), valor com até 5% de diferença, cobrada de mês em mês (25 a 35 dias) mais ou menos no mesmo dia (±3);
+- pelo menos 2 cobranças;
+- **ficam de fora** parcelas (`Parcela 3/10`), IOF, pagamento da fatura, ajustes, compras estornadas e compras frequentes com o mesmo valor (o almoço de R$ 31,90 de toda semana);
+- se a cobrança do último mês não veio, ela aparece como **parou de cobrar** e sai da previsão.
+
+A previsão usa o dia e o valor da última cobrança. Se uma fatura já fechou e não foi importada, o relatório avisa.
+
+---
+
 ## Telegram
 
 O bot (`main.py bot`) fica rodando e:
 
 - **manda um alerta por dia**, a partir de `HORA_ALERTA` (padrão 9h), com o que vence em até 3 dias, vence hoje ou ficou para trás. Cada conta vem com um botão **"✅ Paguei"**. Se o computador estava desligado no horário, o alerta sai quando ele ligar;
-- **responde comandos**: `/status`, `/mes 2026-10`, `/contas`, `/paguei energia`, `/desfazer energia`;
+- **responde comandos**: `/status`, `/mes 2026-10`, `/contas`, `/paguei energia`, `/desfazer energia`, `/recorrentes` (o que ainda vai cair no cartão) e `/recorrentes todas` (todas as recorrentes encontradas);
 - **avisa as outras pessoas** quando alguém marca ou desmarca uma conta, para ninguém pagar duas vezes;
 - **importa sozinho** os extratos que aparecerem em `PATH_ENTRADA` e avisa no chat.
 
@@ -299,6 +335,7 @@ receipt-organizer/
 │   ├── cadastro.py       # comandos de terminal para o contas.yaml
 │   ├── contas.py         # leitura, validação e gravação do contas.yaml
 │   ├── reconcile.py      # conciliação conta × pagamento
+│   ├── recorrentes.py    # compras recorrentes nas faturas do cartão
 │   ├── report.py         # textos e seções do relatório
 │   ├── storage.py        # SQLite: transações, importações, marcações manuais
 │   └── telegram.py       # bot: alertas e comandos

@@ -1,8 +1,8 @@
 import re
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
-from organizer.models import Extrato, Transacao
+from organizer.models import TIPO_CARTAO, TIPO_CONTA, Extrato, Transacao
 
 # BANKID/FID -> nome curto usado no resto do projeto
 BANCOS = {
@@ -51,13 +51,20 @@ def parse_ofx(texto: str) -> Extrato:
         )
 
     datas = [t.data for t in transacoes]
-    inicio = _tag(texto, "DTSTART")
-    fim = _tag(texto, "DTEND")
+    inicio = _data(_tag(texto, "DTSTART")) if _tag(texto, "DTSTART") else min(datas)
+    fim = _data(_tag(texto, "DTEND")) if _tag(texto, "DTEND") else max(datas)
+
+    # Fatura de cartão: o OFX vem em <CCSTMTRS> e o DTEND é o dia do fechamento,
+    # que já não entra na fatura (ex.: fatura de 01/10 a 01/11 tem compras até 31/10).
+    tipo = TIPO_CARTAO if "<CCSTMTRS>" in texto else TIPO_CONTA
+    if tipo == TIPO_CARTAO and _tag(texto, "DTEND"):
+        fim = max([fim - timedelta(days=1), *datas])
 
     return Extrato(
         banco=banco,
         conta=conta,
-        inicio=_data(inicio) if inicio else min(datas),
-        fim=_data(fim) if fim else max(datas),
+        inicio=inicio,
+        fim=fim,
         transacoes=transacoes,
+        tipo=tipo,
     )
