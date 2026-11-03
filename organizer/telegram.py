@@ -4,11 +4,12 @@ import urllib.error
 import urllib.request
 from datetime import date, datetime
 
-from organizer.acoes import buscar_conta, criar_conciliador, desmarcar_paga, marcar_paga
+from organizer.acoes import buscar_conta, buscar_recorrentes, criar_conciliador, desmarcar_paga, marcar_paga
 from organizer.contas import Conta
 from organizer.log import get_logger
 from organizer.reconcile import Competencia, Situacao, Status
-from organizer.report import agrupar, descrever, titulo_mes
+from organizer.recorrentes import FATURAS_ANALISADAS, Previsao, Recorrente, prever
+from organizer.report import SEM_FATURA, agrupar, descrever, lista_de_dias, nome_cartao, reais, titulo_mes
 from organizer.storage import Storage
 
 logger = get_logger()
@@ -32,6 +33,12 @@ Marca um mês específico
 
 /desfazer copel
 Desfaz a última marcação
+
+/recorrentes
+Assinaturas que ainda vão cair no cartão
+
+/recorrentes todas
+Todas as recorrentes encontradas nas faturas
 
 🔔 Todo dia de manhã eu aviso o que vence nos próximos dias ou ficou para trás."""
 
@@ -98,6 +105,7 @@ class ContasBot:
             {"command": "contas", "description": "lista as contas e seus ids"},
             {"command": "paguei", "description": "marca uma conta como paga (ex.: /paguei copel)"},
             {"command": "desfazer", "description": "desfaz a última marcação (ex.: /desfazer copel)"},
+            {"command": "recorrentes", "description": "assinaturas que ainda vão cair no cartão"},
         ]
         self.api.chamar("setMyCommands", commands=comandos)
 
@@ -216,6 +224,8 @@ class ContasBot:
             return self.comando_paguei(argumentos, quem, chat_id)
         if comando == "/desfazer":
             return self.comando_desfazer(argumentos, quem, chat_id)
+        if comando in ("/recorrentes", "/cartao"):
+            return self.comando_recorrentes(argumentos)
         return AJUDA
 
     def comando_status(self) -> str:
@@ -281,6 +291,13 @@ class ContasBot:
         self.avisar_todos(f"↩️ {html.escape(quem)} desfez a marcação de <b>{nome}</b> ({desmarcada})", exceto=chat_id)
         return f"↩️ Marcação de <b>{nome}</b> ({desmarcada}) desfeita."
 
+    def comando_recorrentes(self, argumentos: list[str]) -> str:
+        recorrentes, faturas = buscar_recorrentes(self.storage)
+        if argumentos and argumentos[0].lower() in ("todas", "tudo", "relatorio"):
+            return formatar_recorrentes(recorrentes, faturas)
+        hoje = date.today()
+        return formatar_previsao(prever(recorrentes, faturas, hoje), hoje)
+
     def _conciliador(self):
         # recria a cada uso para enxergar extratos e marcações novos
         return criar_conciliador(self.storage, self.contas)
@@ -313,5 +330,67 @@ def formatar_secoes(titulo: str, situacoes: list[Situacao], hoje: date) -> str:
             linhas.append("")
             linhas.append(f"{icone} <b>{s.vencimento:%d/%m} · {html.escape(s.conta.nome)}</b>")
             linhas.append(html.escape(detalhe))
+
+    return "\n".join(linhas)
+
+
+def formatar_previsao(previsoes: list[Previsao], hoje: date) -> str:
+    linhas = ["<b>💳 Ainda vai cair no cartão</b>"]
+    if not previsoes:
+        return "\n".join([*linhas, "", html.escape(SEM_FATURA)])
+
+    for p in previsoes:
+        linhas += ["", f"<b>{nome_cartao(p.banco)}</b> · fatura fecha {p.fechamento:%d/%m}"]
+        if p.faturas_faltando:
+            linhas.append(f"⚠️ Falta importar a fatura que fechou em {lista_de_dias(p.faturas_faltando)}")
+
+        linhas += ["", f"<u>Até o fechamento ({len(p.ainda_vai_cair)}) · ~{reais(p.total)}</u>"]
+        if not p.ainda_vai_cair:
+            linhas += ["", "Nada mais até o fechamento."]
+        for dia, r in p.ainda_vai_cair:
+            quando = "hoje" if dia == hoje else f"{dia:%d/%m}"
+            linhas += ["", f"🔁 <b>{quando} · {html.escape(r.nome)}</b>", f"~{reais(r.valor)}"]
+
+        if p.ja_deve_ter_caido:
+            linhas += ["", f"<u>Já devem ter caído ({len(p.ja_deve_ter_caido)})</u>", ""]
+            for dia, r in p.ja_deve_ter_caido:
+                linhas.append(f"✔️ {dia:%d/%m} · {html.escape(r.nome)} · {reais(r.valor)}")
+
+    linhas += ["", "💡 Previsão pelas últimas faturas. /recorrentes todas mostra de onde veio."]
+    return "\n".join(linhas)
+
+
+def formatar_recorrentes(recorrentes: list[Recorrente], faturas: dict) -> str:
+    linhas = ["<b>🔁 Compras recorrentes no cartão</b>"]
+    if not faturas:
+        return "\n".join([*linhas, "", html.escape(SEM_FATURA)])
+
+    for (banco, cartao), periodos in faturas.items():
+        ultimas = periodos[-FATURAS_ANALISADAS:]
+        do_cartao = [r for r in recorrentes if (r.banco, r.cartao) == (banco, cartao)]
+        ativas = [r for r in do_cartao if r.ativa]
+        paradas = [r for r in do_cartao if not r.ativa]
+        por_mes = sum((r.valor for r in ativas), 0)
+
+        linhas += [
+            "",
+            f"<b>{nome_cartao(banco)}</b> · {len(ultimas)} fatura(s), {ultimas[0][0]:%d/%m} a {ultimas[-1][1]:%d/%m}",
+            "",
+            f"<u>Ativas ({len(ativas)}) · {reais(por_mes)}/mês</u>",
+        ]
+        for r in ativas:
+            linhas += [
+                "",
+                f"🔁 <b>dia {r.ultima.data.day:02d} · {html.escape(r.nome)}</b>",
+                f"{reais(r.valor)} · cobrada em {lista_de_dias([t.data for t in r.cobrancas])}",
+            ]
+        if paradas:
+            linhas += ["", f"<u>Pararam de cobrar ({len(paradas)})</u>"]
+            for r in paradas:
+                linhas += [
+                    "",
+                    f"⏹️ <b>{html.escape(r.nome)}</b>",
+                    f"{reais(r.valor)} · última em {r.ultima.data:%d/%m}",
+                ]
 
     return "\n".join(linhas)
